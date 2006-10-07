@@ -52,7 +52,7 @@ sub _http_response_charset {
         $parser->eof;
 
         my @ct = HTTP::Headers::Util::split_header_words($parser->header('Content-Type'));
-        my(undef, undef, %ct_param) = @{$ct[0]};
+        my(undef, undef, %ct_param) = @{$ct[0] || []};
         if ($ct_param{charset}) {
             return $ct_param{charset};
         }
