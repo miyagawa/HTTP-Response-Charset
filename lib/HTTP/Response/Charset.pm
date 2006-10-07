@@ -3,40 +3,58 @@ package HTTP::Response::Charset;
 use strict;
 our $VERSION = '0.01';
 
+use HTTP::Headers::Util ();
+
 sub HTTP::Response::charset {
     my $res = shift;
-
     return if $res->is_error;
 
+    return $res->{_http_response_charset}
+        if exists $res->{_http_response_charset};
+
+    my $charset = _http_response_charset($res);
+    if (defined $charset) {
+        return $res->{_http_response_charset} = $charset;
+    }
+
+    return;
+}
+
+sub _http_response_charset {
+    my $res = shift;
+
     # 1) Look in Content-Type: charset=...
-    my @ct  = $res->header('Content-Type');
-    for my $ct (@ct) {
-        if ($ct =~ /;\s*charset=([\w\-]+)/) {
-            return $1;
+    my @ct = HTTP::Headers::Util::split_header_words($res->header('Content-Type'));
+    for my $ct (reverse @ct) {
+        my(undef, undef, %ct_param) = @$ct;
+        if ($ct_param{charset}) {
+            return $ct_param{charset};
         }
     }
 
     # 1.1) If there's no charset=... set and Content-Type doesn't look like text, return
-    unless ( mime_is_text($ct[0]) ) {
+    unless ( mime_is_text($ct[-1]->[0]) ) {
         return;
     }
 
-    my $content = $res->content;
+    # decode the content with Content-Encoding etc. but not Unicode
+    my $content = $res->decoded_content(charset => 'none');
     unless (defined $content) {
         return;
     }
 
     # 2) If it looks like HTML, look for META head tags
     # if there's already META tag scanned, @ct == 2
-    if (@ct < 2 && mime_is_html($ct[0])) {
+    if (@ct < 2 && mime_is_html($ct[0]->[0])) {
         require HTML::HeadParser;
         my $parser = HTML::HeadParser->new;
         $parser->parse($content);
         $parser->eof;
 
-        my $ct = $parser->header('Content-Type');
-        if ($ct && $ct =~ /;\s*charset=([\w\-]+)/) {
-            return $1;
+        my @ct = HTTP::Headers::Util::split_header_words($parser->header('Content-Type'));
+        my(undef, undef, %ct_param) = @{$ct[0]};
+        if ($ct_param{charset}) {
+            return $ct_param{charset};
         }
     }
 
@@ -75,13 +93,11 @@ sub HTTP::Response::charset {
 
 sub mime_is_text {
     my $ct = shift;
-    $ct =~ s/;.*$//;
-    return $ct =~ m!^text/!i || $ct =~ m!^application/(.*?)xml$!i;
+    return $ct =~ m!^text/!i || $ct =~ m!^application/(.*?\+)?xml$!i;
 }
 
 sub mime_is_html {
     my $ct = shift;
-    $ct =~ s/;.*$//;
     return $ct =~ m!^text/html$!i || $ct =~ m!^application/xhtml\+xml$!i;
 }
 
@@ -90,7 +106,7 @@ __END__
 
 =head1 NAME
 
-HTTP::Response::Charset - Adds charset method to HTTP::Response
+HTTP::Response::Charset - Adds and improves charset detectoin of HTTP::Response
 
 =head1 SYNOPSIS
 
@@ -98,15 +114,24 @@ HTTP::Response::Charset - Adds charset method to HTTP::Response
   use HTTP::Response::Charset;
 
   my $response = $ua->get($url);
-  if (my $encoding = $response->charset) {
-      my $content  = decode $encoding, $response->content;
+  if (my $enc = $response->charset) {
+      warn "encoding is $enc";
+
+      # This does what you want only in text/*
+      my $content = $response->decoded_content(charset => $enc);
+
+      # This would be more explicit
+      my $content = decode $enc, $response->content;
   }
 
 =head1 DESCRIPTION
 
 HTTP::Response::Charset adds I<charset> method to HTTP::Response,
-which tries to detect its charset using various ways. Here's a
-fallback order this module tries to look for its charset.
+which tries to detect its charset using various ways.
+
+=head1 HOW THIS MODULE DETECTS RESPONSE ENCODING
+
+Here's a fallback order this module tries to look for.
 
 =over 4
 
@@ -129,26 +154,42 @@ module will scan HTML head tags for:
 
   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
 
-META tag values like this are usually scanned by L<HTML::HeadParser>
-inside LWP::UserAgent automatically.
+Actually, META tag values like this are already scanned by
+L<HTML::HeadParser> inside LWP::UserAgent automatically unless you
+call I<parse_head> to set it to 0.
 
-=item BOM detection
+=item UTF BOM detection
 
-If there's a UTF BOM set in the response body, this module
+If there's an UTF BOM set in the response body, this module
 auto-detects the encoding by recognizing the BOM.
 
 =item XML declaration
 
-If the response MIME type is either I<application/*+xml>, I<text/xml>
-or I<text/html>, this module will scan response body looking for XML
-declaration like:
+If the response looks like XML, this module will scan response body
+looking for XML declaration like:
 
   <?xml version="1.0" encoding="euc-jp"?>
+
+to get the encoding.
 
 =item Encode::Detect
 
 If Encode::Detect module is installed, this module tries to
 auto-detect the encoding using its response body as a test data.
+
+=back
+
+=head1 METHODS
+
+=over 4
+
+=item charset
+
+  $charset = $response->charset;
+
+returns charset of HTTP response body. If the response doesn't look
+like reasonable text data, or when this module fails to detect the
+charset, returns undef.
 
 =back
 
