@@ -45,7 +45,7 @@ sub _http_response_charset {
 
     # 2) If it looks like HTML, look for META head tags
     # if there's already META tag scanned, @ct == 2
-    if (@ct < 2 && mime_is_html($ct[0]->[0])) {
+    if (@ct < 2 && $ct[0]->[0] eq 'text/html') {
         require HTML::HeadParser;
         my $parser = HTML::HeadParser->new;
         $parser->parse($content);
@@ -96,11 +96,6 @@ sub mime_is_text {
     return $ct =~ m!^text/!i || $ct =~ m!^application/(.*?\+)?xml$!i;
 }
 
-sub mime_is_html {
-    my $ct = shift;
-    return $ct =~ m!^text/html$!i || $ct =~ m!^application/xhtml\+xml$!i;
-}
-
 1;
 __END__
 
@@ -149,8 +144,8 @@ data (e.g. audio/mp3), $response->charset will just return undef.
 =item META tag
 
 If there's no charset= attribute in Content-Type, and if Conetnt-Type
-looks like HTML (i.e. I<text/html> or I<application/xhtml+xml>), this
-module will scan HTML head tags for:
+looks like HTML (i.e. I<text/html>), this module will scan HTML head
+tags for:
 
   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
 
@@ -204,6 +199,6 @@ it under the same terms as Perl itself.
 
 =head1 SEE ALSO
 
-L<HTTP::Response>, L<HTML::HeadParser>, L<LWP::UserAgent>, L<Encode::Detect>
+L<HTTP::Response>, L<HTML::HeadParser>, L<LWP::UserAgent>, L<Encode::Detect>, L<http://use.perl.org/~miyagawa/journal/31250>
 
 =cut
